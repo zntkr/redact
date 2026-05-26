@@ -1,0 +1,1118 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <title>PDF Redactor</title>
+  <script src="lib/pdf.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: monospace; background: #1e1e1e; color: #ccc;
+           display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+    #toolbar { background: #111; padding: 8px 12px; display: flex; align-items: center;
+               gap: 10px; border-bottom: 1px solid #333; flex-shrink: 0; }
+    #toolbar-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+
+    #tab-bar { background: #1a1a1a; display: flex; flex-wrap: nowrap; overflow-x: auto;
+               border-bottom: 1px solid #333; flex-shrink: 0; min-height: 32px; }
+    .tab { padding: 6px 14px; background: #252526; color: #888; border-right: 1px solid #333;
+           font-size: 12px; cursor: pointer; display: flex; align-items: center; gap: 8px;
+           user-select: none; }
+    .tab.active { background: #1e1e1e; color: #fff; border-top: 2px solid #007acc; }
+    .tab:hover:not(.active) { background: #2d2d2d; }
+    .tab-close { color: #888; cursor: pointer; border-radius: 50%; width: 16px; height: 16px;
+                 display: flex; align-items: center; justify-content: center; }
+    .tab-close:hover { background: #f44; color: #fff; }
+
+    #drop-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 9999;
+                    background: rgba(0, 120, 212, 0.2); border: 4px dashed #0078d4;
+                    display: none; align-items: center; justify-content: center;
+                    pointer-events: none; }
+    #drop-overlay.active { display: flex; }
+    #drop-text { font-size: 24px; color: #fff; font-weight: bold; text-shadow: 0 2px 4px rgba(0,0,0,0.8); }
+
+    #main { display: flex; flex: 1; overflow: hidden; }
+
+    #panel { width: 360px; min-width: 260px; background: #252526;
+             border-right: 1px solid #333; display: flex; flex-direction: column;
+             overflow: hidden; flex-shrink: 0; }
+
+    #scan-warning { display: none; background: #3a2000; border-bottom: 1px solid #7a4400;
+                    padding: 8px 12px; font-size: 12px; color: #f0a30a; line-height: 1.5; }
+    #text-layer-notice { background: #1a2a1a; border-bottom: 1px solid #2a4a2a;
+                         padding: 5px 12px; font-size: 11px; color: #6a9a6a; line-height: 1.4; }
+
+    #search-box { padding: 10px 12px; border-bottom: 1px solid #333; }
+    #search-box input { width: 100%; padding: 6px 8px; background: #3c3c3c; color: #ccc;
+                        border: 1px solid #555; font-family: monospace; font-size: 13px; }
+    #search-box input:focus { outline: 1px solid #0078d4; }
+    #search-options { display: flex; gap: 14px; margin: 6px 0; font-size: 12px; color: #aaa; }
+    #search-options label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+    #search-actions { display: flex; gap: 6px; margin-top: 4px; }
+
+    #results-area { padding: 10px 12px; border-bottom: 1px solid #333; min-height: 70px; }
+    #results-area h4 { font-size: 11px; color: #888; margin-bottom: 5px; text-transform: uppercase; }
+    .result-total { color: #4ec9b0; font-weight: bold; margin-bottom: 3px; }
+    .result-warn  { color: #f0a30a; font-size: 11px; margin-top: 3px; }
+    .page-hit     { color: #9cdcfe; font-size: 12px; margin-top: 2px; }
+
+    #queue-area { flex: 1; overflow-y: auto; padding: 10px 12px; }
+    #queue-area h4 { font-size: 11px; color: #888; margin-bottom: 6px; text-transform: uppercase; }
+    .queue-item { display: flex; align-items: center; gap: 6px; padding: 5px 8px;
+                  background: #2d2d2d; border: 1px solid #3a3a3a; margin-bottom: 4px; }
+    .queue-term   { flex: 1; font-size: 12px; color: #ddd; word-break: break-all; }
+    .queue-meta   { font-size: 11px; color: #777; white-space: nowrap; }
+    .queue-count  { font-size: 12px; color: #4ec9b0; white-space: nowrap; }
+    .queue-remove { background: none; border: none; color: #888; cursor: pointer;
+                    font-size: 14px; padding: 0 2px; }
+    .queue-remove:hover { color: #f44; }
+
+    #apply-area { padding: 10px 12px; border-top: 1px solid #333;
+                  background: #1e1e1e; flex-shrink: 0; }
+    #queue-summary { font-size: 11px; color: #888; margin-bottom: 7px; }
+
+    button { padding: 5px 12px; background: #3c3c3c; color: #ccc; border: 1px solid #555;
+             font-family: monospace; font-size: 13px; cursor: pointer; }
+    button:hover:not(:disabled) { background: #4a4a4a; }
+    button:disabled { opacity: 0.4; cursor: default; }
+    #btn-apply { width: 100%; background: #0e4f8a; border-color: #1464aa;
+                 color: #fff; padding: 7px; }
+    #btn-apply:hover:not(:disabled) { background: #1464aa; }
+
+    #viewer-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; background: #2b2b2b; }
+
+    #page-nav-bar { flex-shrink: 0; background: #111; padding: 5px 12px;
+                    display: none; align-items: center; gap: 8px;
+                    border-bottom: 1px solid #333; font-size: 12px; }
+    #zoom-controls { margin-left: auto; display: flex; gap: 6px; align-items: center; }
+    #zoom-label { font-size: 12px; color: #aaa; min-width: 45px; text-align: center; }
+
+    /* Çizim modu toggle */
+    #draw-toggle { margin-left: 8px; }
+    #draw-toggle.active { background: #8b2000; border-color: #c03000; color: #fff; }
+
+    #page-scroll { flex: 1; overflow: auto; display: flex;
+                   justify-content: safe center; align-items: safe center; }
+
+    /* PDF.js katmanları */
+    #page-wrapper { position: relative; display: none; line-height: 0; margin: 20px; }
+
+    #pdf-canvas { display: block; }
+
+    /* Metin katmanı — seçilebilir şeffaf metin */
+    .textLayer {
+      position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+      overflow: hidden; line-height: 1;
+      -webkit-text-size-adjust: none; text-size-adjust: none;
+      pointer-events: none; z-index: 2;
+      user-select: none; -webkit-user-select: none;
+    }
+    .textLayer span {
+      color: transparent; position: absolute; white-space: pre;
+      cursor: text; transform-origin: 0% 0%;
+      pointer-events: auto;
+      user-select: text; -webkit-user-select: text;
+    }
+    .textLayer ::selection { background: transparent; }
+
+    /* Manuel çizim katmanı */
+    #draw-canvas { position: absolute; top: 0; left: 0; z-index: 3;
+                   pointer-events: none; cursor: crosshair; }
+
+    /* Çizim modunda pointer event'leri ters çevir */
+    body.draw-mode .textLayer { pointer-events: none; }
+    body.draw-mode #draw-canvas { pointer-events: all; }
+
+    #no-pdf-msg { color: #555; font-size: 13px; align-self: center;
+                  text-align: center; line-height: 2; }
+
+    #bottom-status { background: #007acc; color: #fff; font-size: 12px;
+                     padding: 3px 10px; flex-shrink: 0; }
+
+    /* Seçim sonrası beliren redact tooltip */
+    #sel-tooltip { position: fixed; z-index: 9999; display: none;
+                   background: #b30000; color: #fff; border: none;
+                   padding: 4px 10px; font-family: monospace; font-size: 12px;
+                   cursor: pointer; box-shadow: 0 2px 6px rgba(0,0,0,0.5); }
+    #sel-tooltip:hover { background: #d40000; }
+  </style>
+</head>
+<body>
+
+<div id="drop-overlay">
+  <div id="drop-text">PDF Dosyasını Buraya Bırakın</div>
+</div>
+
+<div id="toolbar">
+  <button id="btn-open" onclick="openPdf()">PDF Aç</button>
+  <div id="toolbar-actions">
+    <button id="btn-undo" onclick="undo()" disabled title="Geri Al (Ctrl+Z)">⟲ Geri Al</button>
+    <button id="btn-redo" onclick="redo()" disabled title="İleri Al (Ctrl+Y)">⟳ İleri Al</button>
+  </div>
+</div>
+<div id="tab-bar"></div>
+
+<div id="main">
+  <div id="panel">
+    <div id="scan-warning">
+      ⚠ Metin katmanı tespit edilemedi. Taranmış PDF — arama çalışmaz, OCR gerekir.
+    </div>
+    <div id="text-layer-notice">
+      ℹ Yalnızca metin katmanı aranır. Görüntü tabanlı metin bulunamaz.
+    </div>
+
+    <div id="search-box">
+      <textarea id="search-input" rows="2" placeholder="Aranacak kelimeler... (Birden fazla ise aralarına virgül koyun veya alt alta yazın)" disabled
+             onkeydown="if(event.key==='Enter' && !event.shiftKey){ event.preventDefault(); searchText(); }" style="width: 100%; box-sizing: border-box; background: #222; color: #eee; border: 1px solid #444; padding: 6px; font-family: monospace; resize: vertical;"></textarea>
+      <div id="search-options">
+        <label><input type="checkbox" id="opt-case"> Harf duyarlı</label>
+        <label><input type="checkbox" id="opt-word"> Tam kelime</label>
+      </div>
+      <div id="search-actions">
+        <button id="btn-search" onclick="searchText()" disabled>Bul</button>
+      </div>
+    </div>
+
+    <div id="results-area">
+      <h4>Arama Sonuçları</h4>
+      <div id="result-content" style="color:#555;font-size:12px;">— henüz arama yapılmadı —</div>
+    </div>
+
+    <div id="queue-area">
+      <h4>Sansürlenecekler Listesi</h4>
+      <div id="queue-list"><div style="color:#555;font-size:12px;">Kuyruk boş</div></div>
+    </div>
+
+    <div id="apply-area">
+      <div id="queue-summary"></div>
+      <button id="btn-apply" onclick="applyCombined()" disabled style="background:#5a1a00; border-color:#8b2800; color:#fff; width:100%; padding: 10px; font-weight: bold; font-size: 14px; margin-top: 5px;">Tüm Değişiklikleri Kaydet</button>
+    </div>
+  </div>
+
+  <div id="viewer-area">
+    <div id="page-nav-bar">
+      <button id="btn-prev" onclick="changePage(-1)" disabled>◀</button>
+      <span id="page-label">— / —</span>
+      <button id="btn-next" onclick="changePage(+1)" disabled>▶</button>
+      <div id="zoom-controls">
+        <button onclick="changeZoom(-0.25)">−</button>
+        <span id="zoom-label">100%</span>
+        <button onclick="changeZoom(+0.25)">+</button>
+        <button id="draw-toggle" onclick="toggleDrawMode()" title="Dikdörtgen çiz ve sansürle">✏ Çiz</button>
+      </div>
+    </div>
+
+    <div id="page-scroll">
+      <div id="no-pdf-msg">PDF seçin.</div>
+      <div id="page-wrapper">
+        <canvas id="pdf-canvas"></canvas>
+        <div id="text-layer" class="textLayer"></div>
+        <canvas id="draw-canvas"></canvas>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="bottom-status">Hazır</div>
+<button id="sel-tooltip" onclick="redactSelection()">Sansürle</button>
+
+<script>
+// Genel Sağ Tık Menüsünü Devre Dışı Bırak
+document.addEventListener('contextmenu', e => e.preventDefault());
+
+// Sürükle Bırak (Drag & Drop) Olayları
+const dropOverlay = document.getElementById('drop-overlay');
+const dropZone = document.getElementById('viewer-area');
+let dragDepth = 0;
+
+dropZone.addEventListener('dragenter', (e) => {
+    e.preventDefault();
+    dragDepth++;
+    dropOverlay.classList.add('active');
+});
+dropZone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+});
+dropZone.addEventListener('dragleave', () => {
+    dragDepth--;
+    if (dragDepth === 0) dropOverlay.classList.remove('active');
+});
+dropZone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dragDepth = 0;
+    dropOverlay.classList.remove('active');
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+        const file = e.dataTransfer.files[0];
+        if (file.path) {
+            window.pywebview.api.open_dropped_pdf(file.path).then(res => {
+                if (res && !res.error) handlePdfLoaded(res);
+                else if (res && res.error) setBottom("Hata: " + res.error);
+            });
+        } else {
+            setBottom("PDF okunuyor... (Lütfen bekleyin)");
+            (async function() {
+                try {
+                    const CHUNK_SIZE = 1024 * 512; // 512 KB
+                    const token = await window.pywebview.api.start_file_upload(file.name);
+                    for (let offset = 0; offset < file.size; offset += CHUNK_SIZE) {
+                        const slice = file.slice(offset, offset + CHUNK_SIZE);
+                        const b64 = await new Promise(resolve => {
+                            const r = new FileReader();
+                            r.onload = e => resolve(e.target.result.split(',')[1]);
+                            r.readAsDataURL(slice);
+                        });
+                        await window.pywebview.api.upload_chunk(token, b64);
+                        setBottom(`PDF Yükleniyor: %${Math.round(Math.min(offset + CHUNK_SIZE, file.size) / file.size * 100)}`);
+                    }
+                    const res = await window.pywebview.api.finish_file_upload(token);
+                    if (res && !res.error) handlePdfLoaded(res);
+                    else if (res && res.error) setBottom("Hata: " + res.error);
+                } catch (e) {
+                    setBottom("Hata: " + e);
+                }
+            })();
+        }
+    }
+});
+
+// PDF.js worker ayarı
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'lib/pdf.worker.min.js';
+
+
+// Global State -> Tabbed State
+let tabs = {};
+let activeTabId = null;
+
+function t() { return activeTabId ? tabs[activeTabId] : null; }
+
+Object.defineProperty(window, 'pdfDoc', { get: () => t() ? t().pdfDoc : null, set: (v) => { if(t()) t().pdfDoc = v; } });
+Object.defineProperty(window, 'currentPage', { get: () => t() ? t().currentPage : 1, set: (v) => { if(t()) t().currentPage = v; } });
+Object.defineProperty(window, 'pageCount', { get: () => t() ? t().pageCount : 0, set: (v) => { if(t()) t().pageCount = v; } });
+Object.defineProperty(window, 'scale', { get: () => t() ? t().scale : BASE_SCALE, set: (v) => { if(t()) t().scale = v; } });
+Object.defineProperty(window, 'pendingRects', { get: () => t() ? t().pendingRects : [], set: (v) => { if(t()) t().pendingRects = v; } });
+Object.defineProperty(window, 'currentSelectionRects', { get: () => t() ? t().currentSelectionRects : [], set: (v) => { if(t()) t().currentSelectionRects = v; } });
+Object.defineProperty(window, 'queue', { get: () => t() ? t().queue : [], set: (v) => { if(t()) t().queue = v; } });
+Object.defineProperty(window, 'lastSearch', { get: () => t() ? t().lastSearch : null, set: (v) => { if(t()) t().lastSearch = v; } });
+Object.defineProperty(window, 'activeSearchMatchIndex', { get: () => t() ? t().activeSearchMatchIndex : -1, set: (v) => { if(t()) t().activeSearchMatchIndex = v; } });
+Object.defineProperty(window, 'historyData', { get: () => t() ? t().historyData : null, set: (v) => { if(t()) t().historyData = v; } });
+Object.defineProperty(window, 'hasTextLayer', { get: () => t() ? t().hasTextLayer : true, set: (v) => { if(t()) t().hasTextLayer = v; } });
+Object.defineProperty(window, 'currentSearchMatches', { get: () => t() ? t().currentSearchMatches : [], set: (v) => { if(t()) t().currentSearchMatches = v; } });
+
+
+const BASE_SCALE = 1.5;
+
+let renderTask     = null;
+let zoomTimeout    = null;
+let rafPending     = false;
+let drawMode       = false;
+let drawing        = false;
+let startX         = 0;
+let startY         = 0;
+let previewRect    = null;
+let hoveredRectIndex = -1;
+
+const pdfCanvas   = document.getElementById('pdf-canvas');
+const pdfCtx      = pdfCanvas.getContext('2d');
+const textLayer   = document.getElementById('text-layer');
+const drawCanvas  = document.getElementById('draw-canvas');
+const drawCtx     = drawCanvas.getContext('2d');
+const pageWrapper = document.getElementById('page-wrapper');
+const pageNavBar  = document.getElementById('page-nav-bar');
+const pageLabel   = document.getElementById('page-label');
+const searchInput = document.getElementById('search-input');
+const resultDiv   = document.getElementById('result-content');
+const queueList   = document.getElementById('queue-list');
+const queueSummary= document.getElementById('queue-summary');
+const bottomStatus= document.getElementById('bottom-status');
+const noPdfMsg    = document.getElementById('no-pdf-msg');
+const optCase     = document.getElementById('opt-case');
+const optWord     = document.getElementById('opt-word');
+
+function setBottom(msg) { bottomStatus.textContent = msg; }
+
+function syncStatus() {
+  if (!t()) return;
+  const total = pendingRects.length + queue.reduce((s, i) => s + (i.rects ? i.rects.length : 0), 0);
+  setBottom(total > 0 ? `${total} alan işaretlendi — "Tüm Değişiklikleri Kaydet" butonuna basın` : 'Hazır — ' + t().filename);
+}
+
+async function initPdfJs() {
+  try {
+    if (typeof pdfjsLib === 'undefined') {
+      setBottom('HATA: pdf.min.js yüklenemedi');
+      return;
+    }
+    const workerSrc = await window.pywebview.api.get_worker_src();
+    const blob = new Blob([workerSrc], { type: 'application/javascript' });
+    pdfjsLib.GlobalWorkerOptions.workerSrc = URL.createObjectURL(blob);
+    pdfjsLib.GlobalWorkerOptions.verbosity = 0;
+    setBottom('PDF.js hazır — PDF Aç\'a tıklayın');
+  } catch(e) {
+    setBottom('PDF.js init hatası: ' + e.message);
+  }
+}
+if (window.pywebview && window.pywebview.api) {
+  initPdfJs();
+} else {
+  window.addEventListener('pywebviewready', initPdfJs);
+}
+
+async function openPdf() {
+  setBottom('Dosya seçiliyor...');
+  const r = await window.pywebview.api.open_pdf_dialog();
+  if (!r) { setBottom('İptal edildi.'); return; }
+  handlePdfLoaded(r);
+}
+
+function handlePdfLoaded(r) {
+  if (r && r.error) { setBottom('Hata: ' + r.error); return; }
+  setBottom('PDF yükleniyor...');
+  const binary = atob(r.pdf_data);
+  const bytes  = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+
+  pdfjsLib.getDocument({ data: bytes }).promise.then(doc => {
+    tabs[r.tab_id] = {
+        id: r.tab_id,
+        filename: r.filename,
+        pdfDoc: doc,
+        currentPage: 1,
+        pageCount: r.page_count,
+        scale: BASE_SCALE,
+        pendingRects: [],
+        currentSelectionRects: [],
+        queue: [],
+        lastSearch: null,
+        activeSearchMatchIndex: -1,
+        historyData: { undo: [], redo: [] },
+        hasTextLayer: r.has_text_layer,
+        currentSearchMatches: [],
+    };
+    switchTab(r.tab_id);
+    setBottom('Hazır — ' + r.filename);
+  }).catch(err => {
+    setBottom('PDF.js yükleme hatası: ' + (err && err.message ? err.message : String(err)));
+  });
+}
+
+function renderTabBar() {
+    const bar = document.getElementById('tab-bar');
+    bar.innerHTML = '';
+    for (const [id, tab] of Object.entries(tabs)) {
+        const div = document.createElement('div');
+        div.className = 'tab' + (id === activeTabId ? ' active' : '');
+        div.innerHTML = `<span>${esc(tab.filename)}</span><span class="tab-close" onclick="closeTab('${id}', event)">✕</span>`;
+        div.onclick = () => switchTab(id);
+        bar.appendChild(div);
+    }
+}
+
+function switchTab(id) {
+    activeTabId = id;
+    renderTabBar();
+    
+    if (!t()) return;
+    
+    document.getElementById('scan-warning').style.display = hasTextLayer ? 'none' : 'block';
+
+    document.getElementById('page-nav-bar').style.display = 'flex';
+    document.getElementById('no-pdf-msg').style.display   = 'none';
+    document.getElementById('page-wrapper').style.display = 'block';
+    
+    const searchInput = document.getElementById('search-input');
+    searchInput.disabled = false;
+    document.getElementById('btn-search').disabled = false;
+
+    renderQueue();
+    updateUndoRedoBtns();
+    
+    const resultDiv = document.getElementById('result-content');
+    if (lastSearch) {
+        resultDiv.textContent = '— önceki arama korundu, sonuçlar gizlendi —';
+    } else {
+        resultDiv.textContent = '— henüz arama yapılmadı —';
+    }
+    resultDiv.style.color = '#555';
+
+    renderPage(currentPage);
+}
+
+function _destroyTab(id) {
+    delete tabs[id];
+    const keys = Object.keys(tabs);
+    if (activeTabId === id) {
+        if (keys.length > 0) {
+            switchTab(keys[keys.length - 1]);
+        } else {
+            activeTabId = null;
+            renderTabBar();
+            document.getElementById('page-wrapper').style.display = 'none';
+            document.getElementById('no-pdf-msg').style.display = 'block';
+            document.getElementById('page-nav-bar').style.display = 'none';
+            document.getElementById('search-input').disabled = true;
+            document.getElementById('btn-search').disabled = true;
+            document.getElementById('btn-apply').disabled = true;
+            setBottom('Hazır');
+        }
+    } else {
+        renderTabBar();
+    }
+}
+
+function closeTab(id, e) {
+    e.stopPropagation();
+    _destroyTab(id);
+}
+
+
+async function renderPage(num) {
+  if (renderTask) { renderTask.cancel(); renderTask = null; }
+
+  const page     = await pdfDoc.getPage(num);
+  const viewport = page.getViewport({ scale });
+
+  pdfCanvas.width  = viewport.width;
+  pdfCanvas.height = viewport.height;
+  drawCanvas.width  = viewport.width;
+  drawCanvas.height = viewport.height;
+
+  renderTask = page.render({ canvasContext: pdfCtx, viewport });
+  await renderTask.promise;
+  renderTask = null;
+
+  textLayer.innerHTML = '';
+  textLayer.style.width  = viewport.width  + 'px';
+  textLayer.style.height = viewport.height + 'px';
+  textLayer.style.setProperty('--scale-factor', viewport.scale);
+
+  try {
+    const textContent = await page.getTextContent();
+    const textRenderTask = pdfjsLib.renderTextLayer({
+      textContentSource: textContent,
+      container:  textLayer,
+      viewport,
+      textDivs:   [],
+    });
+    await textRenderTask.promise;
+  } catch(e) {
+    setBottom('Metin katmanı hatası: ' + e.message);
+  }
+
+  pageLabel.textContent = num + ' / ' + pageCount;
+  document.getElementById('btn-prev').disabled = num <= 1;
+  document.getElementById('btn-next').disabled = num >= pageCount;
+  document.getElementById('zoom-label').textContent = Math.round(scale / BASE_SCALE * 100) + '%';
+
+  redrawPending(viewport.scale);
+}
+
+async function changePage(delta) {
+  const target = currentPage + delta;
+  if (target < 1 || target > pageCount) return;
+  currentPage = target;
+  await renderPage(currentPage);
+  setBottom('Sayfa ' + currentPage);
+}
+
+function changeZoom(delta) {
+  scale = Math.max(0.5, Math.min(4.0, scale + delta));
+  document.getElementById('zoom-label').textContent = Math.round(scale / BASE_SCALE * 100) + '%';
+  clearTimeout(zoomTimeout);
+  zoomTimeout = setTimeout(() => renderPage(currentPage), 150);
+}
+
+function toggleDrawMode() {
+  drawMode = !drawMode;
+  document.body.classList.toggle('draw-mode', drawMode);
+  document.getElementById('draw-toggle').classList.toggle('active', drawMode);
+  document.getElementById('draw-toggle').textContent = drawMode ? '✏ Çiziliyor' : '✏ Çiz';
+  setBottom(drawMode ? 'Çizim modu: sayfada dikdörtgen çizin, sonra "Alan Sansürle" yapın.' : 'Metin seçim modu');
+}
+
+function canvasToPdf(cx, cy) {
+  return { x: cx / scale, y: cy / scale };
+}
+
+drawCanvas.addEventListener('mousedown', e => {
+  if (!drawMode) return;
+  const r = drawCanvas.getBoundingClientRect();
+  startX = e.clientX - r.left;
+  startY = e.clientY - r.top;
+  drawing = true;
+});
+
+drawCanvas.addEventListener('mousemove', e => {
+  if (!drawMode || !drawing) return;
+  const r = drawCanvas.getBoundingClientRect();
+  const cx = e.clientX - r.left, cy = e.clientY - r.top;
+  previewRect = {
+    x: Math.min(startX, cx), y: Math.min(startY, cy),
+    w: Math.abs(cx - startX), h: Math.abs(cy - startY)
+  };
+  if (!rafPending) {
+    rafPending = true;
+    requestAnimationFrame(() => { rafPending = false; redrawPending(scale); });
+  }
+});
+
+drawCanvas.addEventListener('mouseup', e => {
+  if (!drawMode || !drawing) return;
+  drawing = false;
+  if (previewRect && previewRect.w > 4 && previewRect.h > 4) {
+    const p0 = canvasToPdf(previewRect.x, previewRect.y);
+    const p1 = canvasToPdf(previewRect.x + previewRect.w, previewRect.y + previewRect.h);
+    saveHistoryState(); pendingRects.push({
+      x: p0.x, y: p0.y,
+      w: p1.x - p0.x, h: p1.y - p0.y,
+      page_index: currentPage - 1,
+    });
+    updateApplyBtnState();
+    renderQueue();
+    syncStatus();
+  }
+  previewRect = null;
+  redrawPending(scale);
+});
+
+function redrawPending(currentScale) {
+  drawCtx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+
+  for (const item of queue) {
+      if (!item.rects) continue;
+      for (const r of item.rects) {
+          if (r.page_index !== currentPage - 1) continue;
+          const cx = Math.round(r.x * currentScale), cy = Math.round(r.y * currentScale);
+          const cw = Math.round(r.w * currentScale), ch = Math.round(r.h * currentScale);
+          drawCtx.fillStyle = 'rgba(0,0,0,0.55)';
+          drawCtx.strokeStyle = '#f44';
+          drawCtx.fillRect(cx, cy, cw, ch);
+          drawCtx.strokeRect(cx, cy, cw, ch);
+      }
+  }
+
+  for (let i = 0; i < pendingRects.length; i++) {
+    const r = pendingRects[i];
+    if (r.page_index !== currentPage - 1) continue;
+    const cx = Math.round(r.x * currentScale), cy = Math.round(r.y * currentScale);
+    const cw = Math.round(r.w * currentScale), ch = Math.round(r.h * currentScale);
+    if (i === hoveredRectIndex) {
+      drawCtx.fillStyle = 'rgba(0,0,0,1)';
+      drawCtx.fillRect(cx, cy, cw, ch);
+    } else {
+      drawCtx.fillStyle = 'rgba(0,0,0,0.55)';
+      drawCtx.strokeStyle = '#f44';
+      drawCtx.fillRect(cx, cy, cw, ch);
+      drawCtx.strokeRect(cx, cy, cw, ch);
+    }
+  }
+
+  if (activeSearchMatchIndex !== -1 && window.currentSearchMatches && window.currentSearchMatches[activeSearchMatchIndex]) {
+    const match = window.currentSearchMatches[activeSearchMatchIndex];
+    if (match.page_index === currentPage - 1) {
+        const cx = match.rect.x * currentScale, cy = match.rect.y * currentScale;
+        const cw = match.rect.w * currentScale, ch = match.rect.h * currentScale;
+        drawCtx.fillStyle = 'rgba(0, 120, 255, 0.4)';
+        drawCtx.fillRect(cx - 2, cy - 2, cw + 4, ch + 4);
+        drawCtx.strokeStyle = 'blue';
+        drawCtx.lineWidth = 1.5;
+        drawCtx.strokeRect(cx - 2, cy - 2, cw + 4, ch + 4);
+    }
+  }
+
+  for (const r of currentSelectionRects) {
+    if (r.page_index !== currentPage - 1) continue;
+    const cx = r.x * currentScale, cy = r.y * currentScale;
+    const cw = r.w * currentScale, ch = r.h * currentScale;
+    drawCtx.fillStyle = 'rgba(0, 120, 255, 0.35)';
+    drawCtx.fillRect(cx, cy, cw, ch);
+  }
+
+    if (previewRect) {
+      drawCtx.fillStyle = 'rgba(0, 120, 255, 0.4)';
+      drawCtx.strokeStyle = 'rgba(0, 120, 255, 1)';
+      drawCtx.lineWidth = 1;
+      drawCtx.fillRect(previewRect.x, previewRect.y, previewRect.w, previewRect.h);
+      drawCtx.strokeRect(previewRect.x, previewRect.y, previewRect.w, previewRect.h);
+    }
+}
+
+
+async function searchText() {
+  const term = searchInput.value.trim();
+  if (!term) { setBottom('Boş arama.'); return; }
+  const cs = optCase.checked, ww = optWord.checked;
+
+  setBottom('Aranıyor...');
+  document.getElementById('btn-search').disabled = true;
+  resultDiv.innerHTML = '<span style="color:#888">...</span>';
+  activeSearchMatchIndex = -1;
+
+  const res = await window.pywebview.api.search_text(activeTabId, term, cs, ww);
+  document.getElementById('btn-search').disabled = false;
+
+  if (res.error) { resultDiv.textContent = 'Hata: ' + res.error; return; }
+
+  lastSearch = res;
+
+  if (res.total === 0) {
+    resultDiv.innerHTML = '<span style="color:#f44">Eşleşme bulunamadı.</span>';
+    setBottom('Sonuç yok: "' + term + '"');
+    return;
+  }
+
+  const opts = [];
+  if (!cs) opts.push('harf körü'); if (!ww) opts.push('kısmi');
+  const optNote = opts.length ? ' (' + opts.join(', ') + ')' : '';
+
+  let html = `<div class="result-total">"${esc(term)}"${optNote} → ${res.total} eşleşme, ${res.page_count} sayfa</div>`;
+  if (!ww) html += `<div class="result-warn">⚠ Kısmi eşleşme — sonuçları kontrol edin.</div>`;
+  if (!cs) html += `<div class="result-warn">⚠ Harf körü — İ/ı/i farkı gözetilmedi.</div>`;
+
+  html += `
+  <div style="margin-top: 5px; margin-bottom: 5px;">
+    <button onclick="toggleAllSearchMatches(true)" style="background:#333; color:#ccc; border:1px solid #555; cursor:pointer; padding:3px 6px; font-size:11px; margin-right:4px;">Tümünü İşaretle</button>
+    <button onclick="toggleAllSearchMatches(false)" style="background:#333; color:#ccc; border:1px solid #555; cursor:pointer; padding:3px 6px; font-size:11px;">Tümünü Kaldır</button>
+  </div>
+  <div style="max-height: 250px; overflow-y: auto; border: 1px solid #444; padding: 5px; background: #1e1e1e;">`;
+  
+  currentSearchMatches = [];
+  let matchIndex = 0;
+
+  for (const p of res.pages) {
+    html += `<div style="font-weight: bold; margin-top: 5px; color: #aaa;">Sayfa ${p.page_num}</div>`;
+    for (const m of p.matches) {
+       m.page_index = p.page_num - 1; // Ek koordinat bilgisi
+       window.currentSearchMatches.push(m);
+       
+       // Vurgulanacak kelimeyi result.matches.matched_term den al
+       let termToHighlight = m.matched_term ? m.matched_term : term;
+       let safeTerm = termToHighlight.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+       let highlightedContext = esc(m.context).replace(new RegExp(`(${safeTerm})`, 'gi'), '<b style="color: #ff9d00;">$1</b>');
+       
+       html += `<div style="margin-left: 10px; margin-bottom: 4px; font-size: 11px; display: flex; align-items: flex-start;">
+          <input type="checkbox" id="search_match_${matchIndex}" onchange="autoQueueUpdate()" style="margin-top: 2px; margin-right: 6px;">
+          <span onclick="jumpToSearchMatch(${matchIndex})" style="cursor: pointer; line-height: 1.3;" class="search-match-label">${highlightedContext}</span>
+       </div>`;
+       matchIndex++;
+    }
+  }
+  html += `</div>`;
+
+  resultDiv.innerHTML = html;
+  setBottom(`"${term}" için ${res.total} eşleşme listelendi`);
+}
+
+function toggleAllSearchMatches(state) {
+    for (let i = 0; i < currentSearchMatches.length; i++) {
+        const cb = document.getElementById(`search_match_${i}`);
+        if (cb) cb.checked = state;
+    }
+    autoQueueUpdate();
+}
+
+function jumpToSearchMatch(index) {
+  const match = window.currentSearchMatches[index];
+  if (!match) return;
+  
+  activeSearchMatchIndex = index;
+  
+  if (currentPage !== match.page_index + 1) {
+    currentPage = match.page_index + 1;
+    renderPage(currentPage).then(() => {
+        // Zaten renderPage içinde redrawPending çağrılıyor.
+        setBottom(`Sayfa ${currentPage}'e gidildi.`);
+    });
+  } else {
+    redrawPending(scale);
+  }
+}
+
+function autoQueueUpdate() {
+  if (!lastSearch) return;
+  const { term, case_sensitive, whole_word } = lastSearch;
+
+  const selectedRects = currentSearchMatches
+    .map((m, i) => {
+      const cb = document.getElementById(`search_match_${i}`);
+      return cb && cb.checked ? Object.assign({}, m.rect, { page_index: m.page_index }) : null;
+    })
+    .filter(Boolean);
+
+  const idx = queue.findIndex(item => item.term.toLowerCase() === term.toLowerCase());
+  if (selectedRects.length === 0) {
+    if (idx !== -1) { queue.splice(idx, 1); renderQueue(); syncStatus(); }
+    return;
+  }
+  if (idx !== -1) {
+    queue[idx].rects = selectedRects;
+  } else {
+    queue.push({ term, rects: selectedRects, case_sensitive, whole_word });
+  }
+  renderQueue();
+  syncStatus();
+}
+
+
+function updateApplyBtnState() {
+  document.getElementById('btn-apply').disabled = !(queue.length > 0 || pendingRects.length > 0);
+}
+
+function renderQueue() {
+  let html = '', total = 0;
+
+  if (pendingRects.length > 0) {
+    const pages = [...new Set(pendingRects.map(r => r.page_index + 1))].sort((a, b) => a - b);
+    html += `<div class="queue-item">
+      <span class="queue-term">Manuel İşaretlemeler <span class="queue-meta">s.${pages.join(',')}</span></span>
+      <span class="queue-count">${pendingRects.length} alan</span>
+    </div>`;
+    total += pendingRects.length;
+  }
+
+  for (let i = 0; i < queue.length; i++) {
+    const item = queue[i];
+    const itemCount = item.rects ? item.rects.length : 0;
+    total += itemCount;
+    const flags = (item.case_sensitive ? '[HF]' : '') + (item.whole_word ? '[TK]' : '');
+    html += `<div class="queue-item">
+      <span class="queue-term">"${esc(item.term)}" <span class="queue-meta">${flags}</span></span>
+      <span class="queue-count">${itemCount} eşl.</span>
+      <button class="queue-remove" onclick="removeFromQueue(${i})">✕</button>
+    </div>`;
+  }
+
+  if (!html) {
+    queueList.innerHTML = '<div style="color:#555;font-size:12px;">Kuyruk boş</div>';
+    queueSummary.textContent = '';
+    updateApplyBtnState();
+    if (typeof scale !== 'undefined') redrawPending(scale);
+    return;
+  }
+
+  queueList.innerHTML = html;
+  queueSummary.textContent = `${total} alan`;
+  updateApplyBtnState();
+  if (typeof scale !== 'undefined' && drawMode !== undefined) {
+    redrawPending(scale);
+  }
+}
+
+function removeFromQueue(idx) {
+  saveHistoryState();
+  queue.splice(idx, 1);
+  renderQueue();
+  setBottom('Kuyruktan kaldırıldı');
+}
+
+async function applyCombined() {
+  if (!queue.length && !pendingRects.length) return;
+  setBottom('Sansürleniyor...');
+  document.getElementById('btn-apply').disabled = true;
+  document.getElementById('btn-open').disabled  = true;
+
+  const res = await window.pywebview.api.apply_combined_redactions(activeTabId, pendingRects, queue);
+  document.getElementById('btn-open').disabled = false;
+
+  if (!res.success) {
+    setBottom('Hata: ' + res.error);
+    updateApplyBtnState();
+    return;
+  }
+
+  let lines = '';
+  if (res.summary && res.summary.length > 0) {
+     lines = res.summary.map(s => `"${s.term}": ${s.count}`).join(' | ');
+  }
+  
+  const savedMsg = `Kaydedildi: ${res.path} — ${res.total} alan sansürlendi`;
+  _destroyTab(activeTabId);
+  noPdfMsg.textContent = savedMsg;
+  setBottom(savedMsg);
+}
+
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+const selTooltip = document.getElementById('sel-tooltip');
+
+document.addEventListener('selectionchange', () => {
+  if (drawMode) return;
+  const sel = window.getSelection();
+  if (sel.isCollapsed || sel.rangeCount === 0) {
+    selTooltip.style.display = 'none';
+    currentSelectionRects = [];
+  } else {
+    currentSelectionRects = getNormalizedSelectionRects();
+  }
+  redrawPending(scale);
+});
+
+document.addEventListener('mouseup', (e) => {
+  if (drawMode) return;
+  const sel = window.getSelection();
+  if (sel.isCollapsed || sel.rangeCount === 0) {
+    return;
+  }
+  
+  if (!textLayer.contains(sel.anchorNode) && !textLayer.contains(sel.focusNode)) {
+    return;
+  }
+
+  if (currentSelectionRects.length === 0) {
+    return;
+  }
+
+  const range = sel.getRangeAt(0);
+  const rawRects = Array.from(range.getClientRects());
+  const pdfRect = pdfCanvas.getBoundingClientRect();
+  const validRects = rawRects.filter(r => r.width > 2 && r.height > 2 && r.height < pdfRect.height * 0.2);
+  
+  if (!validRects || validRects.length === 0) return;
+
+  redactSelection();
+});
+
+// Sağ Tık (Right-Click) ile sansür önizlemesini silme
+document.getElementById('page-wrapper').addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  const rect = pdfCanvas.getBoundingClientRect();
+  const cx = e.clientX - rect.left;
+  const cy = e.clientY - rect.top;
+  const p = canvasToPdf(cx, cy);
+
+  let removed = false;
+  // Son eklenen (en üstteki) kutuyu bulmak için tersten dönüyoruz
+  for (let i = pendingRects.length - 1; i >= 0; i--) {
+    const pr = pendingRects[i];
+    if (pr.page_index === currentPage - 1) {
+      if (p.x >= pr.x && p.x <= pr.x + pr.w && p.y >= pr.y && p.y <= pr.y + pr.h) {
+        saveHistoryState();
+        pendingRects.splice(i, 1);
+        removed = true;
+        break; // Sadece tıklanan ilk kutuyu sil
+      }
+    }
+  }
+
+  if (removed) {
+    redrawPending(scale);
+    updateApplyBtnState();
+    renderQueue();
+    syncStatus();
+  }
+});
+
+// Fare üzerine geldiğinde (hover) sansür önizlemesini siyah yapma
+let lastHoverEvent = null;
+document.getElementById('page-wrapper').addEventListener('mousemove', (e) => {
+  lastHoverEvent = e;
+  if (rafPending) return;
+  rafPending = true;
+  requestAnimationFrame(() => {
+    rafPending = false;
+    const ev = lastHoverEvent;
+    if (drawMode || pendingRects.length === 0) {
+      if (hoveredRectIndex !== -1) { hoveredRectIndex = -1; redrawPending(scale); }
+      return;
+    }
+    const rect = pdfCanvas.getBoundingClientRect();
+    const p = canvasToPdf(ev.clientX - rect.left, ev.clientY - rect.top);
+    let newHovered = -1;
+    for (let i = pendingRects.length - 1; i >= 0; i--) {
+      const pr = pendingRects[i];
+      if (pr.page_index === currentPage - 1 &&
+          p.x >= pr.x && p.x <= pr.x + pr.w && p.y >= pr.y && p.y <= pr.y + pr.h) {
+        newHovered = i; break;
+      }
+    }
+    if (hoveredRectIndex !== newHovered) { hoveredRectIndex = newHovered; redrawPending(scale); }
+  });
+});
+
+function getNormalizedSelectionRects() {
+  const sel = window.getSelection();
+  if (sel.isCollapsed || sel.rangeCount === 0) return [];
+  
+  const range = sel.getRangeAt(0);
+  const rawRects = Array.from(range.getClientRects());
+  const pdfRect = pdfCanvas.getBoundingClientRect();
+  
+  // 1. Ufak boyutlu ve devasa (container) geçersiz kutuları filtrele
+  const validRects = rawRects.filter(r => r.width > 2 && r.height > 2 && r.height < pdfRect.height * 0.2);
+  
+  // 2. Kutuları dikey kesişimlerine göre "satır" gruplarına ayır
+  let lines = [];
+  for (let r of validRects) {
+    let added = false;
+    for (let line of lines) {
+      const overlap = Math.max(0, Math.min(r.bottom, line.bottom) - Math.max(r.top, line.top));
+      if (overlap > r.height * 0.5) {
+        line.rects.push(r);
+        line.top = Math.min(line.top, r.top);
+        line.bottom = Math.max(line.bottom, r.bottom);
+        added = true;
+        break;
+      }
+    }
+    if (!added) {
+      lines.push({ top: r.top, bottom: r.bottom, rects: [r] });
+    }
+  }
+  
+  let normalizedPdfRects = [];
+  
+  // 3. Her satırdaki kutuları yatayda birleştir ve normalize edilmiş yükseklikle kaydet
+  for (let line of lines) {
+    line.rects.sort((a, b) => a.left - b.left);
+    let merged = [];
+    let current = null;
+    
+    for (let r of line.rects) {
+      if (!current) {
+        current = { left: r.left, right: r.right };
+      } else {
+        // Eğer aradaki boşluk 5px'den küçükse (boşluk karakteri vs.) kutuları birleştir
+        if (r.left <= current.right + 5) {
+          current.right = Math.max(current.right, r.right);
+        } else {
+          merged.push(current);
+          current = { left: r.left, right: r.right };
+        }
+      }
+    }
+    if (current) merged.push(current);
+    
+    // Normalize edilmiş kutuları PDF koordinatlarına çevirip listeye ekle
+    for (let m of merged) {
+      const cx = m.left - pdfRect.left;
+      const cy = line.top - pdfRect.top;
+      const cw = m.right - m.left;
+      const ch = line.bottom - line.top;
+      
+      if (cx < 0 || cy < 0 || cx > pdfRect.width || cy > pdfRect.height) continue;
+      
+      const p0 = canvasToPdf(cx, cy);
+      const p1 = canvasToPdf(cx + cw, cy + ch);
+      
+      const newRect = {
+        x: p0.x, y: p0.y,
+        w: p1.x - p0.x, h: p1.y - p0.y,
+        page_index: currentPage - 1,
+      };
+
+      // Aynı satırda daha önce eklenmiş bir kutu varsa, onun yüksekliğini kopyala (Hizalama)
+      for (const pr of pendingRects) {
+        if (pr.page_index !== newRect.page_index) continue;
+        const overlapY = Math.min(newRect.y + newRect.h, pr.y + pr.h) - Math.max(newRect.y, pr.y);
+        const minHeight = Math.min(newRect.h, pr.h);
+        if (overlapY > minHeight * 0.3) {
+          newRect.y = pr.y;
+          newRect.h = pr.h;
+          break; // İlk bulduğuna hizalanır
+        }
+      }
+
+      // Önceden sansürlenmiş (işaretlenmiş) alanlarla kesişim kontrolü
+      let isOverlapping = false;
+      const tolerance = 3; // 3 noktalık milimetrik çakışmalara izin ver (harf aralıkları için)
+      for (const pr of pendingRects) {
+        if (pr.page_index !== newRect.page_index) continue;
+        
+        const overlapX = Math.min(newRect.x + newRect.w, pr.x + pr.w) - Math.max(newRect.x, pr.x);
+        const overlapY = Math.min(newRect.y + newRect.h, pr.y + pr.h) - Math.max(newRect.y, pr.y);
+        
+        if (overlapX > tolerance && overlapY > tolerance) {
+          isOverlapping = true;
+          break;
+        }
+      }
+      
+      // Sadece daha önce sansürlenmemiş alanları seçime dahil et
+      if (!isOverlapping) {
+        normalizedPdfRects.push(newRect);
+      }
+    }
+  }
+  
+  return normalizedPdfRects;
+}
+
+function redactSelection() { saveHistoryState();
+  const rects = getNormalizedSelectionRects();
+  if (rects.length === 0) return;
+  
+  pendingRects.push(...rects);
+
+  renderQueue();
+  syncStatus();
+  
+  window.getSelection().removeAllRanges();
+  selTooltip.style.display = 'none';
+  currentSelectionRects = [];
+  
+  redrawPending(scale);
+  updateApplyBtnState();
+}
+
+function saveHistoryState() {
+  if (!t()) return;
+  t().historyData.undo.push({
+      pendingRects: JSON.parse(JSON.stringify(pendingRects)),
+      queue: JSON.parse(JSON.stringify(queue))
+  });
+  t().historyData.redo = [];
+  updateUndoRedoBtns();
+}
+
+function undo() {
+  if (!t() || t().historyData.undo.length === 0) return;
+  t().historyData.redo.push({
+      pendingRects: JSON.parse(JSON.stringify(pendingRects)),
+      queue: JSON.parse(JSON.stringify(queue))
+  });
+  const prevState = t().historyData.undo.pop();
+  pendingRects = prevState.pendingRects;
+  queue = prevState.queue;
+  redrawPending(scale);
+  renderQueue();
+  updateUndoRedoBtns();
+  updateApplyBtnState();
+  syncStatus();
+}
+
+function redo() {
+  if (!t() || t().historyData.redo.length === 0) return;
+  t().historyData.undo.push({
+      pendingRects: JSON.parse(JSON.stringify(pendingRects)),
+      queue: JSON.parse(JSON.stringify(queue))
+  });
+  const nextState = t().historyData.redo.pop();
+  pendingRects = nextState.pendingRects;
+  queue = nextState.queue;
+  redrawPending(scale);
+  renderQueue();
+  updateUndoRedoBtns();
+  updateApplyBtnState();
+  syncStatus();
+}
+
+function updateUndoRedoBtns() {
+  if (!t()) {
+      document.getElementById('btn-undo').disabled = true;
+      document.getElementById('btn-redo').disabled = true;
+      return;
+  }
+  document.getElementById('btn-undo').disabled = t().historyData.undo.length === 0;
+  document.getElementById('btn-redo').disabled = t().historyData.redo.length === 0;
+}
+
+document.addEventListener('keydown', e => {
+  if (e.ctrlKey && e.key.toLowerCase() === 'z') { e.preventDefault(); undo(); }
+  if (e.ctrlKey && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); }
+});
+
+</script>
+
+</body>
+</html>

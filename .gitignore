@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.coverage
+htmlcov/
+
+# Pytest
+.pytest_cache/
+
+# Temp upload files
+~/.pdf_redactor_temp_*.pdf
+
+# Test PDFs
+search_test.pdf
+*_redacted.pdf
+*_area.pdf
+
+# Claude Code session data
+.claude/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Venv
+venv/
+.venv/
+env/
