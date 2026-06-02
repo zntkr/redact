@@ -1,13 +1,19 @@
 from pathlib import Path
+import sys
 import webview
 from api import API
+
+
+def _base() -> Path:
+    if getattr(sys, 'frozen', False):
+        return Path(sys.executable).parent
+    return Path(__file__).parent
 
 
 def main():
     api = API()
 
-    # file:// URL — ui/lib/ altındaki PDF.js dosyalarına relative path çalışsın
-    ui_path = Path(__file__).parent / "ui" / "index.html"
+    ui_path = _base() / "ui" / "index.html"
 
     window = webview.create_window(
         title="PDF Redactor",

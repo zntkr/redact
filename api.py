@@ -5,6 +5,8 @@ from __future__ import annotations
 import base64
 import os
 import re
+import sys
+from pathlib import Path
 
 import fitz
 import webview
@@ -34,11 +36,8 @@ class API:
 
     def get_worker_src(self) -> str:
         # Returned as a string so JS can create a blob URL — avoids file:// worker restrictions.
-        worker_path = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)),
-            "ui", "lib", "pdf.worker.min.js"
-        )
-        with open(worker_path, encoding="utf-8") as f:
+        base = Path(sys.executable).parent if getattr(sys, 'frozen', False) else Path(__file__).parent
+        with open(base / "ui" / "lib" / "pdf.worker.min.js", encoding="utf-8") as f:
             return f.read()
 
     def open_pdf_dialog(self) -> dict | None:
